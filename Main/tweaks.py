@@ -65,9 +65,10 @@ def is_admin():
 # --------------------------------------------------
 # Tweak definitions
 # Each tweak is a dict with:
-#   name, description, category, apply(), check()
-# apply() -> bool (success)
-# check() -> bool (True = already privacy-friendly)
+#   name, description, category, apply(), check(), revert()
+# apply()  -> bool (success)
+# check()  -> bool (True = already privacy-friendly)
+# revert() -> bool (success, restores Windows default)
 # --------------------------------------------------
 
 TWEAKS = []
@@ -82,6 +83,7 @@ def tweak(name, description, category):
             "category": category,
             "apply": cls.apply,
             "check": cls.check,
+            "revert": cls.revert,
         })
         return cls
     return decorator
@@ -113,6 +115,19 @@ class DisableTelemetry:
                      "AllowTelemetry")
         return v == 0
 
+    @staticmethod
+    def revert():
+        r1 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Policies\Microsoft\Windows\DataCollection",
+                       "AllowTelemetry")
+        r2 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection",
+                       "AllowTelemetry")
+        r3 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Policies\Microsoft\Windows\DataCollection",
+                       "MaxTelemetryAllowed")
+        return r1 and r2 and r3
+
 
 @tweak("Disable Diagnostic Data", "Prevents sending diagnostic data to Microsoft", "Telemetry & Diagnostics")
 class DisableDiagnosticData:
@@ -135,6 +150,19 @@ class DisableDiagnosticData:
                         r"SOFTWARE\Policies\Microsoft\Windows\DataCollection",
                         "DoNotShowFeedbackNotifications") == 1
 
+    @staticmethod
+    def revert():
+        r1 = _del_reg(winreg.HKEY_CURRENT_USER,
+                       r"SOFTWARE\Microsoft\Windows\CurrentVersion\Diagnostics\DiagTrack",
+                       "ShowedToastAtLevel")
+        r2 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Policies\Microsoft\Windows\DataCollection",
+                       "AllowDeviceNameInTelemetry")
+        r3 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Policies\Microsoft\Windows\DataCollection",
+                       "DoNotShowFeedbackNotifications")
+        return r1 and r2 and r3
+
 
 @tweak("Disable DiagTrack Service", "Stops and disables Connected User Experiences and Telemetry service", "Telemetry & Diagnostics")
 class DisableDiagTrack:
@@ -148,6 +176,12 @@ class DisableDiagTrack:
         r = subprocess.run("sc qc DiagTrack", shell=True, capture_output=True, text=True)
         return "DISABLED" in r.stdout.upper()
 
+    @staticmethod
+    def revert():
+        r1 = _run("sc config DiagTrack start= auto")
+        _run("sc start DiagTrack")
+        return r1
+
 
 @tweak("Disable dmwappushservice", "Stops WAP Push Message Routing Service used for telemetry", "Telemetry & Diagnostics")
 class DisableDmwappush:
@@ -160,6 +194,12 @@ class DisableDmwappush:
     def check():
         r = subprocess.run("sc qc dmwappushservice", shell=True, capture_output=True, text=True)
         return "DISABLED" in r.stdout.upper()
+
+    @staticmethod
+    def revert():
+        r1 = _run("sc config dmwappushservice start= demand")
+        _run("sc start dmwappushservice")
+        return r1
 
 
 @tweak("Disable Error Reporting", "Disables Windows Error Reporting", "Telemetry & Diagnostics")
@@ -178,6 +218,15 @@ class DisableErrorReporting:
         return _get_reg(winreg.HKEY_LOCAL_MACHINE,
                         r"SOFTWARE\Microsoft\Windows\Windows Error Reporting",
                         "Disabled") == 1
+
+    @staticmethod
+    def revert():
+        r1 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Microsoft\Windows\Windows Error Reporting",
+                       "Disabled")
+        r2 = _run("sc config WerSvc start= demand")
+        _run("sc start WerSvc")
+        return r1 and r2
 
 
 @tweak("Disable CEIP", "Disables Customer Experience Improvement Program", "Telemetry & Diagnostics")
@@ -198,6 +247,16 @@ class DisableCEIP:
                         r"SOFTWARE\Policies\Microsoft\SQMClient\Windows",
                         "CEIPEnable") == 0
 
+    @staticmethod
+    def revert():
+        r1 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Policies\Microsoft\SQMClient\Windows",
+                       "CEIPEnable")
+        r2 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Policies\Microsoft\AppV\CEIP",
+                       "CEIPEnable")
+        return r1 and r2
+
 
 @tweak("Disable Application Telemetry", "Disables Application Compatibility telemetry engine", "Telemetry & Diagnostics")
 class DisableAppTelemetry:
@@ -212,6 +271,12 @@ class DisableAppTelemetry:
         return _get_reg(winreg.HKEY_LOCAL_MACHINE,
                         r"SOFTWARE\Policies\Microsoft\Windows\AppCompat",
                         "AITEnable") == 0
+
+    @staticmethod
+    def revert():
+        return _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                        r"SOFTWARE\Policies\Microsoft\Windows\AppCompat",
+                        "AITEnable")
 
 
 # --------------------------------------------------
@@ -236,6 +301,16 @@ class DisableAdID:
                         r"SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo",
                         "Enabled") == 0
 
+    @staticmethod
+    def revert():
+        r1 = _set_reg(winreg.HKEY_CURRENT_USER,
+                       r"SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo",
+                       "Enabled", 1)
+        r2 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Policies\Microsoft\Windows\AdvertisingInfo",
+                       "DisabledByGroupPolicy")
+        return r1 and r2
+
 
 @tweak("Disable Tailored Experiences", "Stops Microsoft from using diagnostic data for personalized tips/ads", "Advertising & Tracking")
 class DisableTailoredExperiences:
@@ -255,6 +330,16 @@ class DisableTailoredExperiences:
                         r"SOFTWARE\Policies\Microsoft\Windows\CloudContent",
                         "DisableTailoredExperiencesWithDiagnosticData") == 1
 
+    @staticmethod
+    def revert():
+        r1 = _del_reg(winreg.HKEY_CURRENT_USER,
+                       r"SOFTWARE\Policies\Microsoft\Windows\CloudContent",
+                       "DisableTailoredExperiencesWithDiagnosticData")
+        r2 = _del_reg(winreg.HKEY_CURRENT_USER,
+                       r"SOFTWARE\Microsoft\Windows\CurrentVersion\Privacy",
+                       "TailoredExperiencesWithDiagnosticDataEnabled")
+        return r1 and r2
+
 
 @tweak("Disable Suggested Content in Settings", "Removes suggested content from the Settings app", "Advertising & Tracking")
 class DisableSuggestedContent:
@@ -270,6 +355,14 @@ class DisableSuggestedContent:
     def check():
         base = r"SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"
         return _get_reg(winreg.HKEY_CURRENT_USER, base, "SubscribedContent-338393Enabled") == 0
+
+    @staticmethod
+    def revert():
+        base = r"SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"
+        r1 = _del_reg(winreg.HKEY_CURRENT_USER, base, "SubscribedContent-338393Enabled")
+        r2 = _del_reg(winreg.HKEY_CURRENT_USER, base, "SubscribedContent-353694Enabled")
+        r3 = _del_reg(winreg.HKEY_CURRENT_USER, base, "SubscribedContent-353696Enabled")
+        return r1 and r2 and r3
 
 
 @tweak("Disable Start Menu Suggestions", "Removes app suggestions and ads from Start Menu", "Advertising & Tracking")
@@ -289,6 +382,15 @@ class DisableStartSuggestions:
                         r"SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager",
                         "SystemPaneSuggestionsEnabled") == 0
 
+    @staticmethod
+    def revert():
+        base = r"SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"
+        r1 = _del_reg(winreg.HKEY_CURRENT_USER, base, "SystemPaneSuggestionsEnabled")
+        r2 = _del_reg(winreg.HKEY_CURRENT_USER, base, "SoftLandingEnabled")
+        r3 = _del_reg(winreg.HKEY_CURRENT_USER, base, "SubscribedContent-310093Enabled")
+        r4 = _del_reg(winreg.HKEY_CURRENT_USER, base, "SubscribedContent-338388Enabled")
+        return r1 and r2 and r3 and r4
+
 
 @tweak("Disable Pre-installed App Delivery", "Stops silent installation of promoted apps", "Advertising & Tracking")
 class DisableSilentApps:
@@ -306,6 +408,15 @@ class DisableSilentApps:
         return _get_reg(winreg.HKEY_CURRENT_USER,
                         r"SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager",
                         "SilentInstalledAppsEnabled") == 0
+
+    @staticmethod
+    def revert():
+        base = r"SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"
+        r1 = _del_reg(winreg.HKEY_CURRENT_USER, base, "SilentInstalledAppsEnabled")
+        r2 = _del_reg(winreg.HKEY_CURRENT_USER, base, "ContentDeliveryAllowed")
+        r3 = _del_reg(winreg.HKEY_CURRENT_USER, base, "OemPreInstalledAppsEnabled")
+        r4 = _del_reg(winreg.HKEY_CURRENT_USER, base, "PreInstalledAppsEnabled")
+        return r1 and r2 and r3 and r4
 
 
 # --------------------------------------------------
@@ -329,6 +440,16 @@ class DisableCortana:
         return _get_reg(winreg.HKEY_LOCAL_MACHINE,
                         r"SOFTWARE\Policies\Microsoft\Windows\Windows Search",
                         "AllowCortana") == 0
+
+    @staticmethod
+    def revert():
+        r1 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Policies\Microsoft\Windows\Windows Search",
+                       "AllowCortana")
+        r2 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Policies\Microsoft\Windows\Windows Search",
+                       "AllowCortanaAboveLock")
+        return r1 and r2
 
 
 @tweak("Disable Web Search in Start", "Prevents Bing web results in Start Menu search", "Cortana & Search")
@@ -355,6 +476,22 @@ class DisableWebSearch:
                         r"SOFTWARE\Microsoft\Windows\CurrentVersion\Search",
                         "BingSearchEnabled") == 0
 
+    @staticmethod
+    def revert():
+        r1 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Policies\Microsoft\Windows\Windows Search",
+                       "DisableWebSearch")
+        r2 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Policies\Microsoft\Windows\Windows Search",
+                       "ConnectedSearchUseWeb")
+        r3 = _del_reg(winreg.HKEY_CURRENT_USER,
+                       r"SOFTWARE\Policies\Microsoft\Windows\Explorer",
+                       "DisableSearchBoxSuggestions")
+        r4 = _del_reg(winreg.HKEY_CURRENT_USER,
+                       r"SOFTWARE\Microsoft\Windows\CurrentVersion\Search",
+                       "BingSearchEnabled")
+        return r1 and r2 and r3 and r4
+
 
 @tweak("Disable Search Highlights", "Removes trending/news content from search", "Cortana & Search")
 class DisableSearchHighlights:
@@ -369,6 +506,12 @@ class DisableSearchHighlights:
         return _get_reg(winreg.HKEY_LOCAL_MACHINE,
                         r"SOFTWARE\Policies\Microsoft\Windows\Windows Search",
                         "EnableDynamicContentInWSB") == 0
+
+    @staticmethod
+    def revert():
+        return _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                        r"SOFTWARE\Policies\Microsoft\Windows\Windows Search",
+                        "EnableDynamicContentInWSB")
 
 
 # --------------------------------------------------
@@ -391,6 +534,14 @@ class DisableActivityHistory:
                         r"SOFTWARE\Policies\Microsoft\Windows\System",
                         "PublishUserActivities") == 0
 
+    @staticmethod
+    def revert():
+        base = r"SOFTWARE\Policies\Microsoft\Windows\System"
+        r1 = _del_reg(winreg.HKEY_LOCAL_MACHINE, base, "EnableActivityFeed")
+        r2 = _del_reg(winreg.HKEY_LOCAL_MACHINE, base, "PublishUserActivities")
+        r3 = _del_reg(winreg.HKEY_LOCAL_MACHINE, base, "UploadUserActivities")
+        return r1 and r2 and r3
+
 
 @tweak("Disable Timeline", "Disables Task View timeline feature", "Activity & History")
 class DisableTimeline:
@@ -405,6 +556,12 @@ class DisableTimeline:
         return _get_reg(winreg.HKEY_LOCAL_MACHINE,
                         r"SOFTWARE\Policies\Microsoft\Windows\System",
                         "EnableActivityFeed") == 0
+
+    @staticmethod
+    def revert():
+        return _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                        r"SOFTWARE\Policies\Microsoft\Windows\System",
+                        "EnableActivityFeed")
 
 
 @tweak("Disable Clipboard History & Sync", "Stops clipboard cloud sync and history", "Activity & History")
@@ -425,6 +582,16 @@ class DisableClipboardSync:
                         r"SOFTWARE\Policies\Microsoft\Windows\System",
                         "AllowCrossDeviceClipboard") == 0
 
+    @staticmethod
+    def revert():
+        r1 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Policies\Microsoft\Windows\System",
+                       "AllowClipboardHistory")
+        r2 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Policies\Microsoft\Windows\System",
+                       "AllowCrossDeviceClipboard")
+        return r1 and r2
+
 
 @tweak("Disable App Launch Tracking", "Stops tracking which apps you launch", "Activity & History")
 class DisableAppLaunchTracking:
@@ -439,6 +606,12 @@ class DisableAppLaunchTracking:
         return _get_reg(winreg.HKEY_CURRENT_USER,
                         r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced",
                         "Start_TrackProgs") == 0
+
+    @staticmethod
+    def revert():
+        return _set_reg(winreg.HKEY_CURRENT_USER,
+                        r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced",
+                        "Start_TrackProgs", 1)
 
 
 # --------------------------------------------------
@@ -466,6 +639,19 @@ class DisableLocation:
                         r"SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors",
                         "DisableLocation") == 1
 
+    @staticmethod
+    def revert():
+        r1 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors",
+                       "DisableLocation")
+        r2 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors",
+                       "DisableWindowsLocationProvider")
+        r3 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors",
+                       "DisableLocationScripting")
+        return r1 and r2 and r3
+
 
 @tweak("Disable Find My Device", "Disables remote device tracking", "Location & Sensors")
 class DisableFindMyDevice:
@@ -480,6 +666,12 @@ class DisableFindMyDevice:
         return _get_reg(winreg.HKEY_LOCAL_MACHINE,
                         r"SOFTWARE\Policies\Microsoft\FindMyDevice",
                         "AllowFindMyDevice") == 0
+
+    @staticmethod
+    def revert():
+        return _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                        r"SOFTWARE\Policies\Microsoft\FindMyDevice",
+                        "AllowFindMyDevice")
 
 
 # --------------------------------------------------
@@ -510,6 +702,22 @@ class DisableOnlineSpeech:
                         r"SOFTWARE\Policies\Microsoft\InputPersonalization",
                         "AllowInputPersonalization") == 0
 
+    @staticmethod
+    def revert():
+        r1 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Policies\Microsoft\InputPersonalization",
+                       "AllowInputPersonalization")
+        r2 = _del_reg(winreg.HKEY_CURRENT_USER,
+                       r"SOFTWARE\Microsoft\InputPersonalization",
+                       "RestrictImplicitInkCollection")
+        r3 = _del_reg(winreg.HKEY_CURRENT_USER,
+                       r"SOFTWARE\Microsoft\InputPersonalization",
+                       "RestrictImplicitTextCollection")
+        r4 = _del_reg(winreg.HKEY_CURRENT_USER,
+                       r"SOFTWARE\Microsoft\InputPersonalization\TrainedDataStore",
+                       "HarvestContacts")
+        return r1 and r2 and r3 and r4
+
 
 @tweak("Disable Inking & Typing Personalization", "Stops collecting typing/inking patterns", "Input & Personalization")
 class DisableInkingPersonalization:
@@ -528,6 +736,16 @@ class DisableInkingPersonalization:
         return _get_reg(winreg.HKEY_CURRENT_USER,
                         r"SOFTWARE\Microsoft\InputPersonalization",
                         "RestrictImplicitInkCollection") == 1
+
+    @staticmethod
+    def revert():
+        r1 = _del_reg(winreg.HKEY_CURRENT_USER,
+                       r"SOFTWARE\Microsoft\Personalization\Settings",
+                       "AcceptedPrivacyPolicy")
+        r2 = _del_reg(winreg.HKEY_CURRENT_USER,
+                       r"SOFTWARE\Microsoft\InputPersonalization",
+                       "RestrictImplicitInkCollection")
+        return r1 and r2
 
 
 # --------------------------------------------------
@@ -548,6 +766,12 @@ class DisableCamera:
                         r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy",
                         "LetAppsAccessCamera") == 2
 
+    @staticmethod
+    def revert():
+        return _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                        r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy",
+                        "LetAppsAccessCamera")
+
 
 @tweak("Disable Microphone for Apps", "Blocks app access to microphone (can re-enable per app in Settings)", "Camera, Mic & Permissions")
 class DisableMicrophone:
@@ -562,6 +786,12 @@ class DisableMicrophone:
         return _get_reg(winreg.HKEY_LOCAL_MACHINE,
                         r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy",
                         "LetAppsAccessMicrophone") == 2
+
+    @staticmethod
+    def revert():
+        return _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                        r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy",
+                        "LetAppsAccessMicrophone")
 
 
 @tweak("Disable Notifications Access", "Blocks app access to notifications", "Camera, Mic & Permissions")
@@ -578,6 +808,12 @@ class DisableNotificationsAccess:
                         r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy",
                         "LetAppsAccessNotifications") == 2
 
+    @staticmethod
+    def revert():
+        return _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                        r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy",
+                        "LetAppsAccessNotifications")
+
 
 @tweak("Disable Account Info Access", "Blocks app access to your account info", "Camera, Mic & Permissions")
 class DisableAccountInfoAccess:
@@ -592,6 +828,12 @@ class DisableAccountInfoAccess:
         return _get_reg(winreg.HKEY_LOCAL_MACHINE,
                         r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy",
                         "LetAppsAccessAccountInfo") == 2
+
+    @staticmethod
+    def revert():
+        return _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                        r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy",
+                        "LetAppsAccessAccountInfo")
 
 
 @tweak("Disable Contacts Access", "Blocks app access to contacts", "Camera, Mic & Permissions")
@@ -608,6 +850,12 @@ class DisableContactsAccess:
                         r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy",
                         "LetAppsAccessContacts") == 2
 
+    @staticmethod
+    def revert():
+        return _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                        r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy",
+                        "LetAppsAccessContacts")
+
 
 @tweak("Disable Calendar Access", "Blocks app access to calendar", "Camera, Mic & Permissions")
 class DisableCalendarAccess:
@@ -623,6 +871,12 @@ class DisableCalendarAccess:
                         r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy",
                         "LetAppsAccessCalendar") == 2
 
+    @staticmethod
+    def revert():
+        return _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                        r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy",
+                        "LetAppsAccessCalendar")
+
 
 @tweak("Disable Call History Access", "Blocks app access to call history", "Camera, Mic & Permissions")
 class DisableCallHistoryAccess:
@@ -637,6 +891,12 @@ class DisableCallHistoryAccess:
         return _get_reg(winreg.HKEY_LOCAL_MACHINE,
                         r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy",
                         "LetAppsAccessCallHistory") == 2
+
+    @staticmethod
+    def revert():
+        return _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                        r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy",
+                        "LetAppsAccessCallHistory")
 
 
 # --------------------------------------------------
@@ -658,6 +918,13 @@ class DisableSettingsSync:
                         r"SOFTWARE\Policies\Microsoft\Windows\SettingSync",
                         "DisableSettingSync") == 2
 
+    @staticmethod
+    def revert():
+        base = r"SOFTWARE\Policies\Microsoft\Windows\SettingSync"
+        r1 = _del_reg(winreg.HKEY_LOCAL_MACHINE, base, "DisableSettingSync")
+        r2 = _del_reg(winreg.HKEY_LOCAL_MACHINE, base, "DisableSettingSyncUserOverride")
+        return r1 and r2
+
 
 @tweak("Disable OneDrive", "Prevents OneDrive from running at startup", "Sync & Cloud")
 class DisableOneDrive:
@@ -676,6 +943,16 @@ class DisableOneDrive:
         return _get_reg(winreg.HKEY_LOCAL_MACHINE,
                         r"SOFTWARE\Policies\Microsoft\Windows\OneDrive",
                         "DisableFileSyncNGSC") == 1
+
+    @staticmethod
+    def revert():
+        r1 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Policies\Microsoft\Windows\OneDrive",
+                       "DisableFileSyncNGSC")
+        r2 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Policies\Microsoft\Windows\OneDrive",
+                       "DisableFileSync")
+        return r1 and r2
 
 
 # --------------------------------------------------
@@ -702,6 +979,19 @@ class DisableWiFiSense:
                         r"SOFTWARE\Microsoft\WcmSvc\wifinetworkmanager\config",
                         "AutoConnectAllowedOEM") == 0
 
+    @staticmethod
+    def revert():
+        r1 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Microsoft\WcmSvc\wifinetworkmanager\config",
+                       "AutoConnectAllowedOEM")
+        r2 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Microsoft\PolicyManager\default\WiFi\AllowWiFiHotSpotReporting",
+                       "Value")
+        r3 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Microsoft\PolicyManager\default\WiFi\AllowAutoConnectToWiFiSenseHotspots",
+                       "Value")
+        return r1 and r2 and r3
+
 
 @tweak("Disable Hotspot 2.0 Networks", "Disables auto-connection to suggested hotspots", "Wi-Fi & Networking")
 class DisableHotspot20:
@@ -716,6 +1006,12 @@ class DisableHotspot20:
         return _get_reg(winreg.HKEY_LOCAL_MACHINE,
                         r"SOFTWARE\Microsoft\WlanSvc\AnqpCache",
                         "OsuRegistrationStatus") == 0
+
+    @staticmethod
+    def revert():
+        return _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                        r"SOFTWARE\Microsoft\WlanSvc\AnqpCache",
+                        "OsuRegistrationStatus")
 
 
 # --------------------------------------------------
@@ -739,6 +1035,15 @@ class DisableEdgeTelemetry:
                         r"SOFTWARE\Policies\Microsoft\Edge",
                         "MetricsReportingEnabled") == 0
 
+    @staticmethod
+    def revert():
+        base = r"SOFTWARE\Policies\Microsoft\Edge"
+        r1 = _del_reg(winreg.HKEY_LOCAL_MACHINE, base, "PersonalizationReportingEnabled")
+        r2 = _del_reg(winreg.HKEY_LOCAL_MACHINE, base, "MetricsReportingEnabled")
+        r3 = _del_reg(winreg.HKEY_LOCAL_MACHINE, base, "SendSiteInfoToImproveServices")
+        r4 = _del_reg(winreg.HKEY_LOCAL_MACHINE, base, "DiagnosticData")
+        return r1 and r2 and r3 and r4
+
 
 @tweak("Disable Edge First Run", "Skips Edge first-run experience and data collection prompts", "Edge & Browser")
 class DisableEdgeFirstRun:
@@ -753,6 +1058,12 @@ class DisableEdgeFirstRun:
         return _get_reg(winreg.HKEY_LOCAL_MACHINE,
                         r"SOFTWARE\Policies\Microsoft\Edge",
                         "HideFirstRunExperience") == 1
+
+    @staticmethod
+    def revert():
+        return _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                        r"SOFTWARE\Policies\Microsoft\Edge",
+                        "HideFirstRunExperience")
 
 
 # --------------------------------------------------
@@ -772,6 +1083,12 @@ class DisableDeliveryOptimization:
         return _get_reg(winreg.HKEY_LOCAL_MACHINE,
                         r"SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization",
                         "DODownloadMode") == 0
+
+    @staticmethod
+    def revert():
+        return _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                        r"SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization",
+                        "DODownloadMode")
 
 
 # --------------------------------------------------
@@ -809,6 +1126,14 @@ class DisableTelemetryTasks:
         )
         return "Disabled" in r.stdout
 
+    @staticmethod
+    def revert():
+        success = True
+        for task in DisableTelemetryTasks.TASKS:
+            if not _run(f'schtasks /Change /TN "{task}" /Enable'):
+                success = False
+        return success
+
 
 # --------------------------------------------------
 # Copilot & AI (Windows 11)
@@ -832,6 +1157,16 @@ class DisableCopilot:
                         r"SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot",
                         "TurnOffWindowsCopilot") == 1
 
+    @staticmethod
+    def revert():
+        r1 = _del_reg(winreg.HKEY_CURRENT_USER,
+                       r"SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot",
+                       "TurnOffWindowsCopilot")
+        r2 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot",
+                       "TurnOffWindowsCopilot")
+        return r1 and r2
+
 
 @tweak("Disable Recall / Snapshots", "Disables Windows Recall AI screenshot feature", "Copilot & AI")
 class DisableRecall:
@@ -850,6 +1185,16 @@ class DisableRecall:
         return _get_reg(winreg.HKEY_LOCAL_MACHINE,
                         r"SOFTWARE\Policies\Microsoft\Windows\WindowsAI",
                         "DisableAIDataAnalysis") == 1
+
+    @staticmethod
+    def revert():
+        r1 = _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                       r"SOFTWARE\Policies\Microsoft\Windows\WindowsAI",
+                       "DisableAIDataAnalysis")
+        r2 = _del_reg(winreg.HKEY_CURRENT_USER,
+                       r"SOFTWARE\Policies\Microsoft\Windows\WindowsAI",
+                       "DisableAIDataAnalysis")
+        return r1 and r2
 
 
 # --------------------------------------------------
@@ -870,6 +1215,12 @@ class DisableRemoteAssistance:
                         r"SYSTEM\CurrentControlSet\Control\Remote Assistance",
                         "fAllowToGetHelp") == 0
 
+    @staticmethod
+    def revert():
+        return _set_reg(winreg.HKEY_LOCAL_MACHINE,
+                        r"SYSTEM\CurrentControlSet\Control\Remote Assistance",
+                        "fAllowToGetHelp", 1)
+
 
 @tweak("Disable KMS Client Online Validation", "Prevents Windows activation from phoning home unnecessarily", "Miscellaneous")
 class DisableKMSPhone:
@@ -884,6 +1235,12 @@ class DisableKMSPhone:
         return _get_reg(winreg.HKEY_LOCAL_MACHINE,
                         r"SOFTWARE\Policies\Microsoft\Windows NT\CurrentVersion\Software Protection Platform",
                         "NoGenTicket") == 1
+
+    @staticmethod
+    def revert():
+        return _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                        r"SOFTWARE\Policies\Microsoft\Windows NT\CurrentVersion\Software Protection Platform",
+                        "NoGenTicket")
 
 
 @tweak("Disable Lock Screen Spotlight", "Removes Microsoft-served images and tips on lock screen", "Miscellaneous")
@@ -903,6 +1260,14 @@ class DisableSpotlight:
                         r"SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager",
                         "RotatingLockScreenEnabled") == 0
 
+    @staticmethod
+    def revert():
+        base = r"SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"
+        r1 = _del_reg(winreg.HKEY_CURRENT_USER, base, "RotatingLockScreenEnabled")
+        r2 = _del_reg(winreg.HKEY_CURRENT_USER, base, "RotatingLockScreenOverlayEnabled")
+        r3 = _del_reg(winreg.HKEY_CURRENT_USER, base, "SubscribedContent-338387Enabled")
+        return r1 and r2 and r3
+
 
 @tweak("Disable Widgets", "Disables Windows 11 Widgets panel", "Miscellaneous")
 class DisableWidgets:
@@ -917,6 +1282,12 @@ class DisableWidgets:
         return _get_reg(winreg.HKEY_LOCAL_MACHINE,
                         r"SOFTWARE\Policies\Microsoft\Dsh",
                         "AllowNewsAndInterests") == 0
+
+    @staticmethod
+    def revert():
+        return _del_reg(winreg.HKEY_LOCAL_MACHINE,
+                        r"SOFTWARE\Policies\Microsoft\Dsh",
+                        "AllowNewsAndInterests")
 
 
 # --------------------------------------------------
