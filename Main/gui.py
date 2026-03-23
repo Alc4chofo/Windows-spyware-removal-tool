@@ -43,6 +43,9 @@ class PrivacyApp:
         actions_menu.add_command(label="Apply Selected", command=self._apply_selected)
         actions_menu.add_command(label="Apply All", command=self._apply_all)
         actions_menu.add_separator()
+        actions_menu.add_command(label="Revert Selected", command=self._revert_selected)
+        actions_menu.add_command(label="Revert All", command=self._revert_all)
+        actions_menu.add_separator()
         actions_menu.add_command(label="Rescan", command=self._scan_status)
         actions_menu.add_separator()
         actions_menu.add_command(label="Exit", command=self.root.quit)
@@ -53,6 +56,7 @@ class PrivacyApp:
         sel_menu.add_command(label="Deselect All", command=self._deselect_all)
         sel_menu.add_separator()
         sel_menu.add_command(label="Select Only Unapplied", command=self._select_unapplied)
+        sel_menu.add_command(label="Select Only Applied", command=self._select_applied)
         menubar.add_cascade(label="Selection", menu=sel_menu)
 
         self.root.config(menu=menubar)
@@ -67,6 +71,12 @@ class PrivacyApp:
 
         ttk.Button(toolbar, text="Apply All",
                    command=self._apply_all).pack(side="left", padx=3)
+
+        ttk.Separator(toolbar, orient="vertical").pack(side="left", fill="y", padx=6, pady=2)
+
+        self.btn_revert = ttk.Button(toolbar, text="Revert Selected",
+                                      command=self._revert_selected)
+        self.btn_revert.pack(side="left", padx=(0, 3))
 
         ttk.Separator(toolbar, orient="vertical").pack(side="left", fill="y", padx=6, pady=2)
 
@@ -332,6 +342,7 @@ class PrivacyApp:
             return
 
         self.btn_apply.configure(state="disabled")
+        self.btn_revert.configure(state="disabled")
         self.status_label.configure(text=f"Applying {len(selected)} tweaks...")
         self.root.update()
 
@@ -352,6 +363,7 @@ class PrivacyApp:
 
     def _apply_done(self, results):
         self.btn_apply.configure(state="normal")
+        self.btn_revert.configure(state="normal")
 
         ok = sum(1 for v in results.values() if v)
         fail = len(results) - ok
@@ -377,6 +389,66 @@ class PrivacyApp:
         for name, w in self.tweak_widgets.items():
             status_text = w["status"].cget("text")
             self.tweak_vars[name].set(status_text == "Not applied")
+
+    def _select_applied(self):
+        """only tick the ones that are already applied (for reverting)"""
+        for name, w in self.tweak_widgets.items():
+            status_text = w["status"].cget("text")
+            self.tweak_vars[name].set(status_text == "Applied")
+
+    def _revert_selected(self):
+        if not is_admin():
+            messagebox.showerror("Admin Required",
+                                 "Restart the application as Administrator.\n"
+                                 "Right-click > Run as administrator.")
+            return
+
+        selected = [t for t in TWEAKS if self.tweak_vars.get(t["name"], tk.BooleanVar()).get()]
+        if not selected:
+            messagebox.showinfo("Nothing Selected", "Select at least one tweak to revert.")
+            return
+
+        if not messagebox.askyesno(
+            "Confirm Revert",
+            f"Revert {len(selected)} tweaks to Windows defaults?\n\n"
+            "This will restore the original system settings.\n"
+            "Some changes need a restart."):
+            return
+
+        self.btn_apply.configure(state="disabled")
+        self.btn_revert.configure(state="disabled")
+        self.status_label.configure(text=f"Reverting {len(selected)} tweaks...")
+        self.root.update()
+
+        def do_revert():
+            results = {}
+            for t in selected:
+                try:
+                    results[t["name"]] = t["revert"]()
+                except Exception:
+                    results[t["name"]] = False
+            self.root.after(0, lambda: self._revert_done(results))
+
+        threading.Thread(target=do_revert, daemon=True).start()
+
+    def _revert_all(self):
+        self._select_applied()
+        self._revert_selected()
+
+    def _revert_done(self, results):
+        self.btn_apply.configure(state="normal")
+        self.btn_revert.configure(state="normal")
+
+        ok = sum(1 for v in results.values() if v)
+        fail = len(results) - ok
+
+        msg = f"{ok} tweaks reverted."
+        if fail:
+            failed = [n for n, v in results.items() if not v]
+            msg += f"\n\n{fail} failed:\n" + "\n".join(f"  - {n}" for n in failed)
+
+        messagebox.showinfo("Done", msg + "\n\nRestart may be needed.")
+        self._scan_status()
 
 
 def main():
